@@ -1,32 +1,22 @@
-using ReactNative.Bridge;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Microsoft.Data.Sqlite;
+using System.Threading.Tasks;
 using System.IO;
 using Newtonsoft.Json.Linq;
 using System.Data;
 using System.Text.RegularExpressions;
+using Microsoft.Data.Sqlite;
+using Microsoft.ReactNative.Managed;
+using Microsoft.ReactNative;
+using Newtonsoft.Json;
 
 namespace RNSqlite2
 {
-    class RNSqlite2Module : ReactContextNativeModuleBase
+    [ReactModule("RNSqlite2")]
+    class RNSqlite2Module
     {
-        public RNSqlite2Module(ReactContext reactContext)
-            : base(reactContext)
-        {
-            this.reactContext = reactContext;
-        }
-
-        public override string Name
-        {
-            get
-            {
-                return "RNSqlite2";
-            }
-        }
-        private readonly ReactContext reactContext;
 
         private static readonly bool DEBUG_MODE = false;
 
@@ -42,115 +32,20 @@ namespace RNSqlite2
         private static readonly Dictionary<string, SqliteTransaction> TRANSACTIONS = new Dictionary<string, SqliteTransaction>();
 
         [ReactMethod]
-        public void test(string message, IPromise promise)
+        public void sampleMethod(string stringArgument, int numberArgument, Action<string> callback)
         {
-            debug("example", "test called: " + message);
-            promise.Resolve(message + "\u0000" + "hoge");
-        }
-
-        private SqliteConnection getDatabase(string name)
-        {
-            if (!DATABASES.ContainsKey(name))
-            {
-#if WINDOWS_UWP
-                string path = Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, name);
-#else
-                string path = Path.Combine(PCLStorage.FileSystem.Current.LocalStorage.Path, name);
-#endif
-                SqliteConnection conn = new SqliteConnection("Filename=" + path);
-                DATABASES[name] = conn;
-                TRANSACTIONS[name] = null;
-            }
-            return DATABASES[name];
-        }
-
-        // TODO: Need improve . This function : command.Parameters.AddWithValue(item.Key, item.Value); don't support bind string by index or i missing something
-        private static void parseJsonArrayToParams(ref string sql, List<JToken> jsonArray, ref SqliteCommand statement)
-        {
-            MatchCollection matches = Regex.Matches(sql, @"\?");
-            Dictionary<string, string> array = new Dictionary<string, string>();
-            int len = matches.Count;
-            if (len > 0)
-            {
-                if (matches.Count > jsonArray.Count)
-                {
-                    throw new Exception("parameter not correct");
-                }
-
-                var lastLen = 0;
-                for (int i = 0; i < len; i++)
-                {
-                    var stringBuilder = new StringBuilder(sql);
-                    stringBuilder.Remove(lastLen + matches[i].Index, 1);
-                    stringBuilder.Insert(lastLen + matches[i].Index, "@" + i);
-                    statement.Parameters.AddWithValue("@" + i, jsonArray[i].ToString());
-                    lastLen += i.ToString().Length;
-                    sql = stringBuilder.ToString();
-                }
-            }
-            else
-            {
-                // This is old code handle txn.executeSql('INSERT INTO Users (name) VALUES (:name)', ['narumiya'])
-                matches = Regex.Matches(sql, @"\:([A-Za-z0-9]*)");
-                len = matches.Count;
-
-                if (matches.Count > jsonArray.Count)
-                {
-                    throw new Exception("parameter not correct");
-                }
-
-                for (int i = 0; i < len; i++)
-                {
-                    statement.Parameters.AddWithValue(matches[i].Value, jsonArray[i].ToString());
-                }
-            }
-        }
-
-        private static bool isSelect(String str)
-        {
-            return str.TrimStart().StartsWith("select", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isInsert(String str)
-        {
-            return str.TrimStart().StartsWith("insert", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isDelete(String str)
-        {
-            return str.TrimStart().StartsWith("delete", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isUpdate(String str)
-        {
-            return str.TrimStart().StartsWith("update", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isBegin(String str)
-        {
-            return str.TrimStart().StartsWith("begin", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isEnd(String str)
-        {
-            return str.TrimStart().StartsWith("end", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isCommit(String str)
-        {
-            return str.TrimStart().StartsWith("commit", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool isRollback(String str)
-        {
-            return str.TrimStart().StartsWith("rollback", StringComparison.OrdinalIgnoreCase);
+            // TODO: Implement some actually useful functionality
+            callback("Received numberArgument: " + numberArgument + " stringArgument: " + stringArgument);
         }
 
         [ReactMethod]
-        public void exec(string dbName, JArray queries, bool readOnly, IPromise promise)
+        public void exec(string dbName, List<JSValue> queriesJS, bool readOnly, IReactPromise<string> promise)
         {
+            JArray queries = JArray.FromObject(ParseJsList(queriesJS));
+
             debug("test called: " + dbName);
             SqliteConnection db = getDatabase(dbName);
+
             try
             {
                 int numQueries = queries.Count;
@@ -230,11 +125,12 @@ namespace RNSqlite2
                 }
 
                 List<Object> data = pluginResultsToPrimitiveData(results);
-                promise.Resolve(data);
+                promise.Resolve(JsonConvert.SerializeObject(data));
             }
             catch (Exception e)
             {
-                promise.Reject("SQLiteError", e);
+                promise.Reject(new ReactError { Exception = e });
+
                 if (TRANSACTIONS[dbName] != null)
                 {
                     TRANSACTIONS[dbName].Rollback();
@@ -249,6 +145,174 @@ namespace RNSqlite2
                     db.Close();
                 }
             }
+        }
+
+        private SqliteConnection getDatabase(string name)
+        {
+            if (!DATABASES.ContainsKey(name))
+            {
+#if WINDOWS_UWP
+                string path = Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, name);
+#else
+                string path = Path.Combine(PCLStorage.FileSystem.Current.LocalStorage.Path, name);
+#endif
+                SqliteConnection conn = new SqliteConnection("Filename=" + path);
+                DATABASES[name] = conn;
+                TRANSACTIONS[name] = null;
+            }
+            return DATABASES[name];
+        }
+
+        // TODO: Need improve . This function : command.Parameters.AddWithValue(item.Key, item.Value); don't support bind string by index or i missing something
+        private static void parseJsonArrayToParams(ref string sql, List<JToken> jsonArray, ref SqliteCommand statement)
+        {
+            MatchCollection matches = Regex.Matches(sql, @"\?");
+            Dictionary<string, string> array = new Dictionary<string, string>();
+            int len = matches.Count;
+            if (len > 0)
+            {
+                if (matches.Count > jsonArray.Count)
+                {
+                    throw new Exception("parameter not correct");
+                }
+
+                var lastLen = 0;
+                for (int i = 0; i < len; i++)
+                {
+                    var stringBuilder = new StringBuilder(sql);
+                    stringBuilder.Remove(lastLen + matches[i].Index, 1);
+                    stringBuilder.Insert(lastLen + matches[i].Index, "@" + i);
+                    statement.Parameters.AddWithValue("@" + i, jsonArray[i].ToString());
+                    lastLen += i.ToString().Length;
+                    sql = stringBuilder.ToString();
+                }
+            }
+            else
+            {
+                // This is old code handle txn.executeSql('INSERT INTO Users (name) VALUES (:name)', ['narumiya'])
+                matches = Regex.Matches(sql, @"\:([A-Za-z0-9_]*)");
+                len = matches.Count;
+
+                if (matches.Count > jsonArray.Count)
+                {
+                    throw new Exception("parameter not correct");
+                }
+
+                for (int i = 0; i < len; i++)
+                {
+                    statement.Parameters.AddWithValue(matches[i].Value, jsonArray[i].ToString());
+                }
+            }
+        }
+
+        private static bool isSelect(String str)
+        {
+            return str.TrimStart().StartsWith("select", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isInsert(String str)
+        {
+            return str.TrimStart().StartsWith("insert", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isDelete(String str)
+        {
+            return str.TrimStart().StartsWith("delete", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isUpdate(String str)
+        {
+            return str.TrimStart().StartsWith("update", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isBegin(String str)
+        {
+            return str.TrimStart().StartsWith("begin", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isEnd(String str)
+        {
+            return str.TrimStart().StartsWith("end", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isCommit(String str)
+        {
+            return str.TrimStart().StartsWith("commit", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool isRollback(String str)
+        {
+            return str.TrimStart().StartsWith("rollback", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static Dictionary<string, object> ParseJsDictionary(IReadOnlyDictionary<string, JSValue> map)
+        {
+            Dictionary<string, object> result = new Dictionary<string, object>();
+
+            foreach (KeyValuePair<string, JSValue> item in map)
+            {
+                switch (item.Value.Type)
+                {
+                    case JSValueType.Object:
+                        result.Add(item.Key, ParseJsDictionary(item.Value.AsObject()));
+                        break;
+                    case JSValueType.Array:
+                        result.Add(item.Key, ParseJsList(item.Value.AsArray()));
+                        break;
+                    case JSValueType.String:
+                        result.Add(item.Key, item.Value.AsString());
+                        break;
+                    case JSValueType.Boolean:
+                        result.Add(item.Key, item.Value.AsBoolean());
+                        break;
+                    case JSValueType.Int64:
+                        result.Add(item.Key, item.Value.AsInt64());
+                        break;
+                    case JSValueType.Double:
+                        result.Add(item.Key, item.Value.AsDouble());
+                        break;
+                    case JSValueType.Null:
+                        result.Add(item.Key, null);
+                        break;
+                }
+            }
+
+            return result;
+        }
+
+        private static List<object> ParseJsList(IReadOnlyList<JSValue> list)
+        {
+            List<object> result = new List<object>();
+
+            foreach (var item in list)
+            {
+                switch (item.Type)
+                {
+                    case JSValueType.Object:
+                        result.Add(ParseJsDictionary(item.AsObject()));
+                        break;
+                    case JSValueType.Array:
+                        result.Add(ParseJsList(item.AsArray()));
+                        break;
+                    case JSValueType.String:
+                        result.Add(item.AsString());
+                        break;
+                    case JSValueType.Boolean:
+                        result.Add(item.AsBoolean());
+                        break;
+                    case JSValueType.Int64:
+                        result.Add(item.AsInt64());
+                        break;
+                    case JSValueType.Double:
+                        result.Add(item.AsDouble());
+                        break;
+                    case JSValueType.Null:
+                        result.Add(null);
+                        break;
+                }
+            }
+
+            return result;
         }
 
         private Object getValueFromCursor(SqliteDataReader reader, int index, Type dataType)

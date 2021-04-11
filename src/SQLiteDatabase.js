@@ -85,7 +85,10 @@ function unescapeBlob(data) {
 
 SQLiteDatabase.prototype.exec = function exec(queries, readOnly, callback) {
   function onSuccess(rawResults) {
-    var results = map(rawResults, dearrayifyRow)
+    var parsedResults = typeof rawResults == 'string' 
+      ? JSON.parse(rawResults) 
+      : rawResults
+    var results = map(parsedResults, dearrayifyRow)
     callback(null, results)
   }
 
